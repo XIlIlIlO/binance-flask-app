@@ -6,29 +6,30 @@ import os
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})  # ✅ CORS 전체 경로 허용 명시
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-
-# ✅ API 키 환경변수로 받기
+# API 키 환경변수
 api_key = os.environ.get("XH7JN637MfMSELLQjpviyLHuaiNvICWYTi2fssTVJQDDQu0lcdczaK64WFqI2xjQ")
 api_secret = os.environ.get("CCDDXGfxD1PJCSubXTc406DbFP5pBTuDbZ9WzrrC4nicCpVLtcuQyIrjkl4IKQpr")
 client = Client(api_key, api_secret)
 
-# ✅ 변동성 데이터 저장용 변수
-volatility_cache = []
+# 변동성 캐시
+volatility_cache_15m = []
+volatility_cache_1m = []
 
-# ✅ USDT 선물 심볼 가져오기
+# 심볼 가져오기
 def get_usdt_symbols():
     exchange_info = client.futures_exchange_info()
-    symbols = [s['symbol'] for s in exchange_info['symbols']
-               if s['quoteAsset'] == 'USDT' and s['contractType'] == 'PERPETUAL'
-               and not s['symbol'].startswith('LD')]
-    return symbols
+    return [
+        s['symbol'] for s in exchange_info['symbols']
+        if s['quoteAsset'] == 'USDT' and s['contractType'] == 'PERPETUAL'
+        and not s['symbol'].startswith('LD')
+    ]
 
-# ✅ 15분간 변동성 계산
-def get_15m_volatility(symbol):
+# 변동성 계산 (봉 수, 간격)
+def get_volatility(symbol, interval, limit):
     try:
-        klines = client.futures_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1MINUTE, limit=15)
+        klines = client.futures_klines(symbol=symbol, interval=interval, limit=limit)
         highs = [float(k[2]) for k in klines]
         lows = [float(k[3]) for k in klines]
         open_price = float(klines[0][1])
@@ -42,33 +43,56 @@ def get_15m_volatility(symbol):
     except:
         return None
 
-# ✅ 백그라운드에서 1분마다 실행될 함수
-def update_volatility():
-    global volatility_cache
+# 15분 기준 업데이트
+def update_volatility_15m():
+    global volatility_cache_15m
     while True:
+        start = time.time()
         symbols = get_usdt_symbols()
         results = []
 
         for sym in symbols:
-            data = get_15m_volatility(sym)
+            data = get_volatility(sym, Client.KLINE_INTERVAL_1MINUTE, 15)
             if data:
                 results.append(data)
 
         top_30 = sorted(results, key=lambda x: x["volatility"], reverse=True)[:30]
-        volatility_cache = top_30
-        print(f"🔁 Updated top 30 at {time.strftime('%X')}")
-        time.sleep(60)
+        volatility_cache_15m = top_30
+        print(f"[15m] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
 
-@app.route("/")
-def home():
-    return "✅ Binance Volatility API is running"
+        time.sleep(max(0, 60 - (time.time() - start)))
 
+# 1분 기준 업데이트
+def update_volatility_1m():
+    global volatility_cache_1m
+    while True:
+        start = time.time()
+        symbols = get_usdt_symbols()
+        results = []
+
+        for sym in symbols:
+            data = get_volatility(sym, Client.KLINE_INTERVAL_1MINUTE, 1)
+            if data:
+                results.append(data)
+
+        top_30 = sorted(results, key=lambda x: x["volatility"], reverse=True)[:30]
+        volatility_cache_1m = top_30
+        print(f"[1m] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
+
+        time.sleep(max(0, 60 - (time.time() - start)))
+
+# API 엔드포인트
 @app.route("/top_volatility")
-def top_volatility():
-    return jsonify(volatility_cache)
+def top_volatility_15m():
+    return jsonify(volatility_cache_15m)
 
-# ✅ 서버 시작 시 수집기 쓰레드도 같이 시작
+@app.route("/top_volatility_1m")
+def top_volatility_1m():
+    return jsonify(volatility_cache_1m)
+
+# 서버 실행
 if __name__ == "__main__":
-    threading.Thread(target=update_volatility, daemon=True).start()
+    threading.Thread(target=update_volatility_15m, daemon=True).start()
+    threading.Thread(target=update_volatility_1m, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
 
