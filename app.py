@@ -3,10 +3,10 @@ from binance.client import Client
 import threading
 import time
 import os
-from flask_cors import CORS  # ✅ 추가
+from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # ✅ 모든 도메인 허용
+CORS(app, resources={r"/*": {"origins": "*"}})  # ✅ CORS 전체 경로 허용 명시
 
 
 # ✅ API 키 환경변수로 받기
