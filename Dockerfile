@@ -1,11 +1,11 @@
-FROM python:3.10-slim
+FROM python:3.10
 
 WORKDIR /app
-COPY . /app
 
-RUN pip install --upgrade pip
+COPY requirements.txt requirements.txt
 RUN pip install -r requirements.txt
 
-EXPOSE 8080
+COPY . .
 
+EXPOSE 8080  # 필수! Railway는 이걸로 포트를 감지함
 CMD ["python", "app.py"]
