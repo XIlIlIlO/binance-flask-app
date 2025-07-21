@@ -3,8 +3,11 @@ from binance.client import Client
 import threading
 import time
 import os
+from flask_cors import CORS  # ✅ 추가
 
 app = Flask(__name__)
+CORS(app)  # ✅ 모든 도메인 허용
+
 
 # ✅ API 키 환경변수로 받기
 api_key = os.environ.get("XH7JN637MfMSELLQjpviyLHuaiNvICWYTi2fssTVJQDDQu0lcdczaK64WFqI2xjQ")
@@ -64,7 +67,8 @@ def home():
 def top_volatility():
     return jsonify(volatility_cache)
 
+# ✅ 서버 시작 시 수집기 쓰레드도 같이 시작
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))  # <-- 핵심!
     threading.Thread(target=update_volatility, daemon=True).start()
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=8080)
+
