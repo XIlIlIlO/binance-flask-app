@@ -1,2 +1,3 @@
 flask
 python-binance
+flask_cors     # ✅ 반드시 추가
