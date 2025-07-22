@@ -16,8 +16,9 @@ client = Client(api_key, api_secret)
 # 변동성 캐시
 volatility_cache_15m = []
 volatility_cache_1m = []
+volatility_cache_1h = []
 
-# 심볼 가져오기
+# USDT 페어 심볼 목록 가져오기
 def get_usdt_symbols():
     exchange_info = client.futures_exchange_info()
     return [
@@ -26,7 +27,7 @@ def get_usdt_symbols():
         and not s['symbol'].startswith('LD')
     ]
 
-# 변동성 계산 (봉 수, 간격)
+# 변동성 계산 함수
 def get_volatility(symbol, interval, limit):
     try:
         klines = client.futures_klines(symbol=symbol, interval=interval, limit=limit)
@@ -43,7 +44,7 @@ def get_volatility(symbol, interval, limit):
     except:
         return None
 
-# 15분 기준 업데이트
+# 15분 변동성 업데이트
 def update_volatility_15m():
     global volatility_cache_15m
     while True:
@@ -59,10 +60,9 @@ def update_volatility_15m():
         top_30 = sorted(results, key=lambda x: x["volatility"], reverse=True)[:30]
         volatility_cache_15m = top_30
         print(f"[15m] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
-
         time.sleep(max(0, 60 - (time.time() - start)))
 
-# 1분 기준 업데이트
+# 1분 변동성 업데이트
 def update_volatility_1m():
     global volatility_cache_1m
     while True:
@@ -78,7 +78,24 @@ def update_volatility_1m():
         top_30 = sorted(results, key=lambda x: x["volatility"], reverse=True)[:30]
         volatility_cache_1m = top_30
         print(f"[1m] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
+        time.sleep(max(0, 60 - (time.time() - start)))
 
+# 1시간 변동성 업데이트
+def update_volatility_1h():
+    global volatility_cache_1h
+    while True:
+        start = time.time()
+        symbols = get_usdt_symbols()
+        results = []
+
+        for sym in symbols:
+            data = get_volatility(sym, Client.KLINE_INTERVAL_1MINUTE, 60)
+            if data:
+                results.append(data)
+
+        top_30 = sorted(results, key=lambda x: x["volatility"], reverse=True)[:30]
+        volatility_cache_1h = top_30
+        print(f"[1h] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
         time.sleep(max(0, 60 - (time.time() - start)))
 
 # API 엔드포인트
@@ -90,9 +107,14 @@ def top_volatility_15m():
 def top_volatility_1m():
     return jsonify(volatility_cache_1m)
 
+@app.route("/top_volatility_1h")
+def top_volatility_1h():
+    return jsonify(volatility_cache_1h)
+
 # 서버 실행
 if __name__ == "__main__":
     threading.Thread(target=update_volatility_15m, daemon=True).start()
     threading.Thread(target=update_volatility_1m, daemon=True).start()
+    threading.Thread(target=update_volatility_1h, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
 
