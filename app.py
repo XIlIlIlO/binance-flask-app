@@ -17,6 +17,7 @@ client = Client(api_key, api_secret)
 volatility_cache_15m = []
 volatility_cache_1m = []
 volatility_cache_1h = []
+volatility_cache_5m = []
 
 # USDT 페어 심볼 목록 가져오기
 def get_usdt_symbols():
@@ -98,6 +99,23 @@ def update_volatility_1h():
         print(f"[1h] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
         time.sleep(max(0, 60 - (time.time() - start)))
 
+def update_volatility_5m():
+    global volatility_cache_5m
+    while True:
+        start = time.time()
+        symbols = get_usdt_symbols()
+        results = []
+
+        for sym in symbols:
+            data = get_volatility(sym, Client.KLINE_INTERVAL_1MINUTE, 5)
+            if data:
+                results.append(data)
+
+        top_30 = sorted(results, key=lambda x: x["volatility"], reverse=True)[:30]
+        volatility_cache_5m = top_30
+        print(f"[5m] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
+        time.sleep(max(0, 60 - (time.time() - start)))
+
 # API 엔드포인트
 @app.route("/top_volatility")
 def top_volatility_15m():
@@ -111,10 +129,16 @@ def top_volatility_1m():
 def top_volatility_1h():
     return jsonify(volatility_cache_1h)
 
+@app.route("/top_volatility_5m")
+def top_volatility_5m():
+    return jsonify(volatility_cache_5m)
+
+
 # 서버 실행
 if __name__ == "__main__":
     threading.Thread(target=update_volatility_15m, daemon=True).start()
     threading.Thread(target=update_volatility_1m, daemon=True).start()
     threading.Thread(target=update_volatility_1h, daemon=True).start()
+    threading.Thread(target=update_volatility_5m, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
 
