@@ -8,18 +8,26 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# API 키 환경변수
+# =========================
+# 1) API 키 + 타임아웃 추가
+# =========================
 api_key = os.environ.get("XH7JN637MfMSELLQjpviyLHuaiNvICWYTi2fssTVJQDDQu0lcdczaK64WFqI2xjQ")
 api_secret = os.environ.get("CCDDXGfxD1PJCSubXTc406DbFP5pBTuDbZ9WzrrC4nicCpVLtcuQyIrjkl4IKQpr")
-client = Client(api_key, api_secret)
 
-# 변동성 캐시
+# 연결 3초 / 응답 8초 타임아웃
+client = Client(api_key, api_secret, requests_params={"timeout": (3, 8)})
+
+# =========================
+# 캐시 (이름 그대로 유지)
+# =========================
 volatility_cache_15m = []
 volatility_cache_1m = []
 volatility_cache_1h = []
 volatility_cache_5m = []
 
-# USDT 페어 심볼 목록 가져오기
+# =========================
+# USDT 페어 심볼 목록 (기존 유지)
+# =========================
 def get_usdt_symbols():
     exchange_info = client.futures_exchange_info()
     return [
@@ -28,95 +36,98 @@ def get_usdt_symbols():
         and not s['symbol'].startswith('LD')
     ]
 
-# 변동성 계산 함수
-def get_volatility(symbol, interval, limit):
+# =========================
+# 1분봉 klines에서 n개 윈도우로 변동성 계산
+# =========================
+def _calc_from_1m_klines(klines, n):
+    if not klines or len(klines) < n:
+        return None
+    window = klines[-n:]
     try:
-        klines = client.futures_klines(symbol=symbol, interval=interval, limit=limit)
-        highs = [float(k[2]) for k in klines]
-        lows = [float(k[3]) for k in klines]
-        open_price = float(klines[0][1])
-        close_price = float(klines[-1][4])
+        highs = [float(k[2]) for k in window]
+        lows  = [float(k[3]) for k in window]
+        open_price  = float(window[0][1])
+        close_price = float(window[-1][4])
         high = max(highs)
-        low = min(lows)
-
+        low  = max(min(lows), 1e-12)  # 0 나눗셈 방지
         volatility = abs((high - low) / low) * 100
         color = "green" if close_price > open_price else "red"
-        return {"symbol": symbol, "volatility": volatility, "color": color}
+        return volatility, color
     except:
         return None
 
-# 15분 변동성 업데이트
-def update_volatility_15m():
-    global volatility_cache_15m
+# ======================================================
+# ✅ 최소 수정 핵심
+#    심볼당 60개(1분봉)만 받아서 1/5/15/60분을 한 번에 계산
+#    (기존 4개 스레드 → 단일 스레드 루프)
+# ======================================================
+def update_volatility_all():
+    global volatility_cache_1m, volatility_cache_5m, volatility_cache_15m, volatility_cache_1h
     while True:
         start = time.time()
-        symbols = get_usdt_symbols()
-        results = []
+        try:
+            symbols = get_usdt_symbols()
+        except Exception as e:
+            print("[ALL] exchange_info error:", e)
+            symbols = []
+
+        res_1m, res_5m, res_15m, res_1h = [], [], [], []
 
         for sym in symbols:
-            data = get_volatility(sym, Client.KLINE_INTERVAL_1MINUTE, 15)
-            if data:
-                results.append(data)
+            # 심볼당 1번만 60개 1분봉 요청
+            try:
+                kl = client.futures_klines(
+                    symbol=sym,
+                    interval=Client.KLINE_INTERVAL_1MINUTE,
+                    limit=60
+                )
+            except Exception as e:
+                # 타임아웃/네트워크 오류 등은 이번 라운드에서만 누락
+                # 다음 라운드에서 재시도됨
+                # print(f"[ALL] klines error {sym}:", e)
+                kl = None
 
-        top_30 = sorted(results, key=lambda x: x["volatility"], reverse=True)[:30]
-        volatility_cache_15m = top_30
-        print(f"[15m] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
-        time.sleep(max(0, 60 - (time.time() - start)))
+            # 네 윈도우 계산
+            r1  = _calc_from_1m_klines(kl, 1)
+            r5  = _calc_from_1m_klines(kl, 5)
+            r15 = _calc_from_1m_klines(kl, 15)
+            r60 = _calc_from_1m_klines(kl, 60)
 
-# 1분 변동성 업데이트
-def update_volatility_1m():
-    global volatility_cache_1m
-    while True:
-        start = time.time()
-        symbols = get_usdt_symbols()
-        results = []
+            if r1:
+                vol, col = r1
+                res_1m.append({"symbol": sym, "volatility": vol, "color": col})
+            if r5:
+                vol, col = r5
+                res_5m.append({"symbol": sym, "volatility": vol, "color": col})
+            if r15:
+                vol, col = r15
+                res_15m.append({"symbol": sym, "volatility": vol, "color": col})
+            if r60:
+                vol, col = r60
+                res_1h.append({"symbol": sym, "volatility": vol, "color": col})
 
-        for sym in symbols:
-            data = get_volatility(sym, Client.KLINE_INTERVAL_1MINUTE, 1)
-            if data:
-                results.append(data)
+        # 정렬 후 상위 30개로 캐시 교체 (원자적)
+        res_1m.sort(key=lambda x: x["volatility"], reverse=True)
+        res_5m.sort(key=lambda x: x["volatility"], reverse=True)
+        res_15m.sort(key=lambda x: x["volatility"], reverse=True)
+        res_1h.sort(key=lambda x: x["volatility"], reverse=True)
 
-        top_30 = sorted(results, key=lambda x: x["volatility"], reverse=True)[:30]
-        volatility_cache_1m = top_30
-        print(f"[1m] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
-        time.sleep(max(0, 60 - (time.time() - start)))
+        volatility_cache_1m  = res_1m[:30]
+        volatility_cache_5m  = res_5m[:30]
+        volatility_cache_15m = res_15m[:30]
+        volatility_cache_1h  = res_1h[:30]
 
-# 1시간 변동성 업데이트
-def update_volatility_1h():
-    global volatility_cache_1h
-    while True:
-        start = time.time()
-        symbols = get_usdt_symbols()
-        results = []
+        print(f"[ALL] 🔁 Updated at {time.strftime('%X')} "
+              f"(1m:{len(volatility_cache_1m)} / 5m:{len(volatility_cache_5m)} / "
+              f"15m:{len(volatility_cache_15m)} / 1h:{len(volatility_cache_1h)})")
 
-        for sym in symbols:
-            data = get_volatility(sym, Client.KLINE_INTERVAL_1MINUTE, 60)
-            if data:
-                results.append(data)
+        # 60초 주기 유지 (오버런 시 1초만 쉬고 재시작)
+        elapsed = time.time() - start
+        time.sleep(60 - elapsed if elapsed < 60 else 1.0)
 
-        top_30 = sorted(results, key=lambda x: x["volatility"], reverse=True)[:30]
-        volatility_cache_1h = top_30
-        print(f"[1h] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
-        time.sleep(max(0, 60 - (time.time() - start)))
-
-def update_volatility_5m():
-    global volatility_cache_5m
-    while True:
-        start = time.time()
-        symbols = get_usdt_symbols()
-        results = []
-
-        for sym in symbols:
-            data = get_volatility(sym, Client.KLINE_INTERVAL_1MINUTE, 5)
-            if data:
-                results.append(data)
-
-        top_30 = sorted(results, key=lambda x: x["volatility"], reverse=True)[:30]
-        volatility_cache_5m = top_30
-        print(f"[5m] 🔁 Updated at {time.strftime('%X')} with {len(top_30)} entries")
-        time.sleep(max(0, 60 - (time.time() - start)))
-
-# API 엔드포인트
+# =========================
+# API 엔드포인트 (그대로)
+# =========================
 @app.route("/top_volatility")
 def top_volatility_15m():
     return jsonify(volatility_cache_15m)
@@ -133,12 +144,13 @@ def top_volatility_1h():
 def top_volatility_5m():
     return jsonify(volatility_cache_5m)
 
-
+# =========================
 # 서버 실행
+# =========================
 if __name__ == "__main__":
-    threading.Thread(target=update_volatility_15m, daemon=True).start()
-    threading.Thread(target=update_volatility_1m, daemon=True).start()
-    threading.Thread(target=update_volatility_1h, daemon=True).start()
-    threading.Thread(target=update_volatility_5m, daemon=True).start()
+    # 기존 4개 스레드 대신 단일 스레드로 네 구간 동시 갱신
+    threading.Thread(target=update_volatility_all, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
+
+
 
