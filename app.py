@@ -112,10 +112,10 @@ def update_volatility_all():
         res_15m.sort(key=lambda x: x["volatility"], reverse=True)
         res_1h.sort(key=lambda x: x["volatility"], reverse=True)
 
-        volatility_cache_1m  = res_1m[:30]
-        volatility_cache_5m  = res_5m[:30]
-        volatility_cache_15m = res_15m[:30]
-        volatility_cache_1h  = res_1h[:30]
+        volatility_cache_1m  = res_1m[:26]
+        volatility_cache_5m  = res_5m[:26]
+        volatility_cache_15m = res_15m[:26]
+        volatility_cache_1h  = res_1h[:26]
 
         print(f"[ALL] 🔁 Updated at {time.strftime('%X')} "
               f"(1m:{len(volatility_cache_1m)} / 5m:{len(volatility_cache_5m)} / "
@@ -150,3 +150,4 @@ def top_volatility_5m():
 if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
+
