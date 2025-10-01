@@ -18,7 +18,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 #    BINANCE_API_KEY, BINANCE_API_SECRET, CMC_API_KEY
 api_key = os.environ.get("BINANCE_API_KEY") or os.environ.get("XH7JN637MfMSELLQjpviyLHuaiNvICWYTi2fssTVJQDDQu0lcdczaK64WFqI2xjQ")
 api_secret = os.environ.get("BINANCE_API_SECRET") or os.environ.get("CCDDXGfxD1PJCSubXTc406DbFP5pBTuDbZ9WzrrC4nicCpVLtcuQyIrjkl4IKQpr")
-cmc_api_key = os.environ.get("CMC_API_KEY")
+cmc_api_key = os.environ.get("CMC_API_KEY") or os.environ.get("6c86676e-4853-4153-8158-310a4b271708")
 
 client = Client(api_key, api_secret, requests_params={"timeout": (3, 8)})
 
@@ -241,6 +241,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
