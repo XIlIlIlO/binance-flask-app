@@ -1,4 +1,4 @@
-# app.py (Railway)
+# app.py (Railway) — 하드코딩 버전
 
 from flask import Flask, jsonify
 from binance.client import Client
@@ -12,15 +12,14 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # =========================
-# 1) API 키 + 타임아웃
+# 🔒 하드코딩 API 키
 # =========================
-# ⚠️ Railway 환경변수에 설정 권장:
-#    BINANCE_API_KEY, BINANCE_API_SECRET, CMC_API_KEY
-api_key = os.environ.get("BINANCE_API_KEY") or os.environ.get("XH7JN637MfMSELLQjpviyLHuaiNvICWYTi2fssTVJQDDQu0lcdczaK64WFqI2xjQ")
-api_secret = os.environ.get("BINANCE_API_SECRET") or os.environ.get("CCDDXGfxD1PJCSubXTc406DbFP5pBTuDbZ9WzrrC4nicCpVLtcuQyIrjkl4IKQpr")
-cmc_api_key = os.environ.get("CMC_API_KEY") or os.environ.get("6c86676e-4853-4153-8158-310a4b271708")
+BINANCE_API_KEY    = "XH7JN637MfMSELLQjpviyLHuaiNvICWYTi2fssTVJQDDQu0lcdczaK64WFqI2xjQ"
+BINANCE_API_SECRET = "CCDDXGfxD1PJCSubXTc406DbFP5pBTuDbZ9WzrrC4nicCpVLtcuQyIrjkl4IKQpr"
+CMC_API_KEY        = "6c86676e-4853-4153-8158-310a4b271708"
 
-client = Client(api_key, api_secret, requests_params={"timeout": (3, 8)})
+# 연결 3초 / 응답 8초 타임아웃
+client = Client(BINANCE_API_KEY, BINANCE_API_SECRET, requests_params={"timeout": (3, 8)})
 
 # =========================
 # 캐시
@@ -29,10 +28,6 @@ volatility_cache_15m = []
 volatility_cache_1m = []
 volatility_cache_1h = []
 volatility_cache_5m = []
-
-# CMC Top30 캐시(5분 주기)
-cmc_top30_cache = []  # [{rank, name, symbol, market_cap_usd}]
-cmc_last_update_ts = 0
 
 # =========================
 # USDT 페어 심볼
@@ -60,7 +55,6 @@ def _calc_from_1m_klines(klines, n):
         close_price = float(window[-1][4])
         high = max(highs)
         low  = max(min(lows), 1e-12)
-
         volatility = abs((high - low) / low) * 100.0
         color = "green" if close_price > open_price else "red"
         return volatility, color, quote_vol_sum
@@ -68,7 +62,7 @@ def _calc_from_1m_klines(klines, n):
         return None
 
 # ======================================================
-# ✅ 심볼당 60개(1분봉)로 1/5/15/60분 동시 계산 (1분 주기)
+# ✅ 1분봉 60개로 1/5/15/60분 동시 계산 (1분 주기)
 # ======================================================
 def update_volatility_all():
     global volatility_cache_1m, volatility_cache_5m, volatility_cache_15m, volatility_cache_1h
@@ -125,17 +119,16 @@ def update_volatility_all():
         time.sleep(60 - elapsed if elapsed < 60 else 1.0)
 
 # ======================================================
-# ✅ CMC Top30 (5분 주기)
+# ✅ CMC Top30 (5분 주기) — 하드코딩 키 사용
 # ======================================================
 CMC_ENDPOINT = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest"
+cmc_top30_cache = []
+cmc_last_update_ts = 0
 
 def _fetch_cmc_top30() -> list:
-    if not cmc_api_key:
-        print("[CMC] CMC_API_KEY not set.")
-        return []
     headers = {
         "Accepts": "application/json",
-        "X-CMC_PRO_API_KEY": cmc_api_key
+        "X-CMC_PRO_API_KEY": CMC_API_KEY
     }
     params = {
         "start": "1",
@@ -157,10 +150,9 @@ def _fetch_cmc_top30() -> list:
             rows.append({
                 "rank": item.get("cmc_rank"),
                 "name": item.get("name"),
-                "symbol": item.get("symbol"),  # e.g., BTC
+                "symbol": item.get("symbol"),
                 "market_cap_usd": usd.get("market_cap")
             })
-        # market_cap 정렬 보정
         rows.sort(key=lambda x: (x["market_cap_usd"] is None, -(x["market_cap_usd"] or 0)))
         return rows
     except requests.RequestException as e:
@@ -179,45 +171,17 @@ def update_cmc_top30():
         else:
             print("[CMC] ⚠️ update skipped (empty)")
         elapsed = time.time() - start
-        sleep_for = 300 - elapsed if elapsed < 300 else 5  # 5분 주기
+        sleep_for = 300 - elapsed if elapsed < 300 else 5
         time.sleep(max(1, sleep_for))
 
 # =========================
-# API 엔드포인트
+# 조인 엔드포인트 (시총+1H 거래대금/색)
 # =========================
-@app.route("/top_volatility")
-def top_volatility_15m():
-    return jsonify(volatility_cache_15m)
-
-@app.route("/top_volatility_1m")
-def top_volatility_1m():
-    return jsonify(volatility_cache_1m)
-
-@app.route("/top_volatility_1h")
-def top_volatility_1h():
-    return jsonify(volatility_cache_1h)
-
-@app.route("/top_volatility_5m")
-def top_volatility_5m():
-    return jsonify(volatility_cache_5m)
-
-# CMC Top30
-@app.route("/top_marketcap")
-def top_marketcap():
-    return jsonify({
-        "last_updated": cmc_last_update_ts,
-        "data": cmc_top30_cache
-    })
-
-# CMC Top30 + 1H 조인 (권장)
 @app.route("/top_marketcap_enriched")
 def top_marketcap_enriched():
-    # futures 심볼 매핑: "BTC" -> "BTCUSDT"
-    # 바이낸스 선물에 없는 심볼은 volume/color None으로 반환
-    futures_index = {item["symbol"]: item for item in volatility_cache_1h}  # "BTCUSDT": {...}
     out = []
     for row in cmc_top30_cache:
-        symbol = row["symbol"]  # e.g., BTC
+        symbol = row["symbol"]
         fut = symbol + "USDT"
         oneh = next((x for x in volatility_cache_1h if x["symbol"] == fut), None)
         out.append({
@@ -234,6 +198,23 @@ def top_marketcap_enriched():
         "data": out
     })
 
+# 기존 변동성 엔드포인트
+@app.route("/top_volatility")
+def top_volatility_15m():
+    return jsonify(volatility_cache_15m)
+
+@app.route("/top_volatility_1m")
+def top_volatility_1m():
+    return jsonify(volatility_cache_1m)
+
+@app.route("/top_volatility_1h")
+def top_volatility_1h():
+    return jsonify(volatility_cache_1h)
+
+@app.route("/top_volatility_5m")
+def top_volatility_5m():
+    return jsonify(volatility_cache_5m)
+
 # =========================
 # 서버 실행
 # =========================
@@ -241,7 +222,6 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
-
 
 
 
