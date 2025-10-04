@@ -1,6 +1,6 @@
-# app.py — Railway (Flask) — CMC Top30 × Binance 1H Enriched
+# app.py — Railway (Flask) — CMC Top100 × Binance 1H Enriched + Range Slice
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from binance.client import Client
 import threading
 import time
@@ -12,7 +12,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # ======================================================
-# 🔒 하드코딩 API 키
+# 🔒 하드코딩 API 키 (현재 방식 유지)
 # ======================================================
 BINANCE_API_KEY    = "XH7JN637MfMSELLQjpviyLHuaiNvICWYTi2fssTVJQDDQu0lcdczaK64WFqI2xjQ"
 BINANCE_API_SECRET = "CCDDXGfxD1PJCSubXTc406DbFP5pBTuDbZ9WzrrC4nicCpVLtcuQyIrjkl4IKQpr"
@@ -33,9 +33,9 @@ volatility_cache_1h  = []
 volatility_map_1h_all = {}  # { "BTCUSDT": {...} }
 futures_symbols_set   = set()
 
-# CMC 캐시
-CMC_ENDPOINT      = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest"
-cmc_top30_cache   = []  # [{rank, name, symbol, market_cap_usd}]
+# CMC 캐시 (이 변수명은 그대로 두되, 실제로 Top100 보관)
+CMC_ENDPOINT       = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest"
+cmc_top30_cache    = []  # [{rank, name, symbol, market_cap_usd}]  ← 실제로 Top100 저장
 cmc_last_update_ts = 0
 
 
@@ -92,17 +92,31 @@ def _calc_from_1m_klines(klines, n):
 # 주기 업데이트: 1분봉 60개로 1/5/15/60분 결과 동시 계산 (1분 주기)
 #  - 엔드포인트 표출용 상위 N (26)
 #  - 조인용 전심볼 1H 맵 (volatility_map_1h_all)
+#  - 최적화: CMC Top100 × "SYMBOLUSDT" 교집합만 1분봉 수집
 # ======================================================
 def update_volatility_all():
-    global volatility_cache_1m, volatility_cache_5m, volatility_cache_15m, volatility_cache_1h, volatility_map_1h_all
+    global volatility_cache_1m, volatility_cache__5m, volatility_cache_15m, volatility_cache_1h, volatility_map_1h_all
     N = 26
     while True:
         start = time.time()
         try:
-            symbols = get_usdt_symbols()
+            all_fut_symbols = get_usdt_symbols()
         except Exception as e:
             print("[ALL] exchange_info error:", e)
-            symbols = []
+            all_fut_symbols = []
+
+        # CMC Top100의 심볼 집합 (예: {"BTC","ETH",...})
+        cmc_symbols = {row["symbol"] for row in cmc_top30_cache if row.get("symbol")}
+        # 우리가 조인에 쓰는 표준 선물 티커는 "SYMBOLUSDT" 뿐이므로, 그 교집합만 수집
+        target = []
+        if cmc_symbols and futures_symbols_set:
+            for sym in cmc_symbols:
+                fut = f"{sym}USDT"
+                if fut in futures_symbols_set:
+                    target.append(fut)
+
+        # 초기 구동 등으로 target이 비면 전체 수행 (안전망)
+        symbols = target if target else all_fut_symbols
 
         res_1m, res_5m, res_15m, res_1h_list = [], [], [], []
         map_1h_all = {}
@@ -149,17 +163,17 @@ def update_volatility_all():
         volatility_cache_15m = res_15m[:N]
         volatility_cache_1h  = res_1h_list[:N]
 
-        print(f"[ALL] 🔁 {time.strftime('%X')} (1m:{len(res_1m)} / 5m:{len(res_5m)} / 15m:{len(res_15m)} / 1h:{len(res_1h_list)})")
+        print(f"[ALL] 🔁 {time.strftime('%X')} (symbols:{len(symbols)} | 1m:{len(res_1m)} / 5m:{len(res_5m)} / 15m:{len(res_15m)} / 1h:{len(res_1h_list)})")
         elapsed = time.time() - start
         time.sleep(60 - elapsed if elapsed < 60 else 1.0)
 
 
 # ======================================================
-# CMC Top30 (5분 주기)
+# CMC Top100 (5분 주기)
 # ======================================================
-def _fetch_cmc_top30():
+def _fetch_cmc_top100():
     headers = {"Accepts": "application/json", "X-CMC_PRO_API_KEY": CMC_API_KEY}
-    params  = {"start": "1", "limit": "30", "convert": "USD", "sort": "market_cap", "sort_dir": "desc"}
+    params  = {"start": "1", "limit": "100", "convert": "USD", "sort": "market_cap", "sort_dir": "desc"}
     try:
         r = requests.get(CMC_ENDPOINT, headers=headers, params=params, timeout=20)
         r.raise_for_status()
@@ -183,13 +197,13 @@ def _fetch_cmc_top30():
         return []
 
 
-def update_cmc_top30():
+def update_cmc_top30():  # 함수명은 호환을 위해 유지 (실제로 Top100)
     global cmc_top30_cache, cmc_last_update_ts
     while True:
         start = time.time()
-        rows = _fetch_cmc_top30()
+        rows = _fetch_cmc_top100()      # ★ Top100으로 확장
         if rows:
-            cmc_top30_cache   = rows
+            cmc_top30_cache    = rows   # ★ 변수명은 유지하되, 내용은 Top100
             cmc_last_update_ts = int(time.time())
             print(f"[CMC] ✅ updated {len(rows)} at {time.strftime('%X')}")
         else:
@@ -200,7 +214,7 @@ def update_cmc_top30():
 
 
 # ======================================================
-# 엔드포인트
+# 엔드포인트 (기존 유지 + 범위 전용 추가)
 # ======================================================
 @app.route("/top_volatility")
 def top_volatility_15m():
@@ -218,12 +232,12 @@ def top_volatility_1h():
 def top_volatility_5m():
     return jsonify(volatility_cache_5m)
 
-# ✅ CMC Top30 × Binance 1H 교집합 병합
+# ✅ CMC Top100 × Binance 1H 교집합 병합 (기존 엔드포인트: 전체 반환)
 @app.route("/top_marketcap_enriched")
 def top_marketcap_enriched():
     out = []
-    for row in cmc_top30_cache:
-        symbol = row["symbol"]              # 예: BTC, ETH, WLFI ...
+    for row in cmc_top30_cache:  # 실제로 Top100
+        symbol = row["symbol"]              # 예: BTC, ETH, ...
         fut    = symbol + "USDT"            # 예: BTCUSDT
 
         # 교집합: 실제 바이낸스 선물에 있어야 병합
@@ -258,6 +272,61 @@ def top_marketcap_enriched():
     })
 
 
+# ✅ 새 엔드포인트: 랭크 범위 슬라이싱 (예: ?start=1&end=25)
+@app.route("/top_marketcap_enriched_range")
+def top_marketcap_enriched_range():
+    try:
+        start_rank = int(request.args.get("start", 1))
+        end_rank   = int(request.args.get("end", 25))
+    except ValueError:
+        start_rank, end_rank = 1, 25
+
+    # 범위 가드
+    start_rank = max(1, start_rank)
+    end_rank   = min(100, end_rank)
+    if start_rank > end_rank:
+        start_rank, end_rank = 1, 25
+
+    out = []
+    for row in cmc_top30_cache:  # 실제로 Top100
+        rank = row.get("rank")
+        if rank is None or rank < start_rank or rank > end_rank:
+            continue
+
+        symbol = row["symbol"]
+        fut    = symbol + "USDT"
+
+        if fut not in futures_symbols_set:
+            continue
+
+        oneh = volatility_map_1h_all.get(fut)
+        if not oneh:
+            continue
+
+        out.append({
+            "rank": rank,
+            "name": row["name"],
+            "symbol": symbol,
+            "market_cap_usd": row["market_cap_usd"],
+            "futures_symbol": fut,
+            "volume_usdt_1h": oneh.get("volume_usdt"),
+            "open_1h": oneh.get("open"),
+            "close_1h": oneh.get("close"),
+            "color_1h": oneh.get("color"),
+        })
+
+    out.sort(key=lambda x: x["rank"])
+
+    return jsonify({
+        "last_updated_unix": cmc_last_update_ts,
+        "last_updated_utc": datetime.fromtimestamp(cmc_last_update_ts, tz=timezone.utc).isoformat(),
+        "start": start_rank,
+        "end": end_rank,
+        "count": len(out),
+        "data": out,
+    })
+
+
 # ======================================================
 # 실행
 # ======================================================
@@ -265,8 +334,6 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
-
-
 
 
 
