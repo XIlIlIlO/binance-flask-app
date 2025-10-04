@@ -236,17 +236,12 @@ def top_volatility_5m():
 @app.route("/top_marketcap_enriched")
 def top_marketcap_enriched():
     out = []
-    for row in cmc_top30_cache:  # 실제로 Top100
-        symbol = row["symbol"]              # 예: BTC, ETH, ...
-        fut    = symbol + "USDT"            # 예: BTCUSDT
+    for row in cmc_top30_cache:  # 실제 Top100
+        symbol = row["symbol"]            # 예: BTC
+        fut    = symbol + "USDT"          # 예: BTCUSDT
 
-        # 교집합: 실제 바이낸스 선물에 있어야 병합
-        if fut not in futures_symbols_set:
-            continue
-
-        oneh = volatility_map_1h_all.get(fut)
-        if not oneh:
-            continue  # 아직 1H 데이터가 로드 전일 수 있음
+        listed = fut in futures_symbols_set
+        oneh   = volatility_map_1h_all.get(fut) if listed else None
 
         out.append({
             "rank": row["rank"],
@@ -254,12 +249,22 @@ def top_marketcap_enriched():
             "symbol": symbol,
             "market_cap_usd": row["market_cap_usd"],
 
-            "futures_symbol": fut,
-            "volume_usdt_1h": oneh.get("volume_usdt"),
-            "open_1h": oneh.get("open"),
-            "close_1h": oneh.get("close"),
-            "color_1h": oneh.get("color"),  # green/red (1시간 구간)
+            "futures_symbol": fut if listed else None,   # ★ 미상장은 None
+            "volume_usdt_1h": oneh.get("volume_usdt") if oneh else 0,
+            "open_1h": oneh.get("open")   if oneh else None,
+            "close_1h": oneh.get("close") if oneh else None,
+            "color_1h": oneh.get("color") if oneh else None,  # 프론트에서 회색 처리
         })
+
+    # 랭크 순서 유지
+    out.sort(key=lambda x: x["rank"] if x["rank"] is not None else 10**9)
+
+    return jsonify({
+        "last_updated_unix": cmc_last_update_ts,
+        "last_updated_utc": datetime.fromtimestamp(cmc_last_update_ts, tz=timezone.utc).isoformat(),
+        "count": len(out),
+        "data": out,
+    })
 
     # 시총 순서 유지(이미 rank 정렬). 필요 시 아래로 재정렬 가능
     # out.sort(key=lambda x: (x["market_cap_usd"] is None, -(x["market_cap_usd"] or 0)))
@@ -281,38 +286,33 @@ def top_marketcap_enriched_range():
     except ValueError:
         start_rank, end_rank = 1, 25
 
-    # 범위 가드
     start_rank = max(1, start_rank)
     end_rank   = min(100, end_rank)
     if start_rank > end_rank:
         start_rank, end_rank = 1, 25
 
     out = []
-    for row in cmc_top30_cache:  # 실제로 Top100
+    for row in cmc_top30_cache:  # 실제 Top100
         rank = row.get("rank")
         if rank is None or rank < start_rank or rank > end_rank:
             continue
 
         symbol = row["symbol"]
-        fut    = symbol + "USDT"
+        fut    = f"{symbol}USDT"
 
-        if fut not in futures_symbols_set:
-            continue
-
-        oneh = volatility_map_1h_all.get(fut)
-        if not oneh:
-            continue
+        listed = fut in futures_symbols_set
+        oneh   = volatility_map_1h_all.get(fut) if listed else None
 
         out.append({
             "rank": rank,
             "name": row["name"],
             "symbol": symbol,
             "market_cap_usd": row["market_cap_usd"],
-            "futures_symbol": fut,
-            "volume_usdt_1h": oneh.get("volume_usdt"),
-            "open_1h": oneh.get("open"),
-            "close_1h": oneh.get("close"),
-            "color_1h": oneh.get("color"),
+            "futures_symbol": fut if listed else None,   # ★ 미상장은 None
+            "volume_usdt_1h": oneh.get("volume_usdt") if oneh else 0,
+            "open_1h": oneh.get("open")   if oneh else None,
+            "close_1h": oneh.get("close") if oneh else None,
+            "color_1h": oneh.get("color") if oneh else None,
         })
 
     out.sort(key=lambda x: x["rank"])
@@ -322,9 +322,10 @@ def top_marketcap_enriched_range():
         "last_updated_utc": datetime.fromtimestamp(cmc_last_update_ts, tz=timezone.utc).isoformat(),
         "start": start_rank,
         "end": end_rank,
-        "count": len(out),
+        "count": len(out),   # ★ 항상 25에 가까움(랭크가 비는 경우 제외)
         "data": out,
     })
+
 
 
 # ======================================================
@@ -334,6 +335,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
