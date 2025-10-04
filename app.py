@@ -277,7 +277,7 @@ def top_marketcap_enriched():
             "volume_usdt_1h": oneh.get("volume_usdt") if oneh else 0,
             "open_1h": oneh.get("open")   if oneh else None,
             "close_1h": oneh.get("close") if oneh else None,
-            "color_1h": oneh.get("color") if oneh else None,  # 프론트에서 회색 처리
+            "color_1h": (oneh.get("color") if oneh else "gray"),  # 프론트에서 회색 처리
         })
 
     # 랭크 순서 유지
@@ -336,7 +336,7 @@ def top_marketcap_enriched_range():
             "volume_usdt_1h": oneh.get("volume_usdt") if oneh else 0,
             "open_1h": oneh.get("open")   if oneh else None,
             "close_1h": oneh.get("close") if oneh else None,
-            "color_1h": oneh.get("color") if oneh else None,
+            "color_1h": (oneh.get("color") if oneh else "gray"),
         })
 
     out.sort(key=lambda x: x["rank"])
@@ -359,6 +359,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
