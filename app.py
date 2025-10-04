@@ -95,7 +95,7 @@ def _calc_from_1m_klines(klines, n):
 #  - 최적화: CMC Top100 × "SYMBOLUSDT" 교집합만 1분봉 수집
 # ======================================================
 def update_volatility_all():
-    global volatility_cache_1m, volatility_cache__5m, volatility_cache_15m, volatility_cache_1h, volatility_map_1h_all
+    global volatility_cache_1m, volatility_cache_5m, volatility_cache_15m, volatility_cache_1h, volatility_map_1h_all
     N = 26
     while True:
         start = time.time()
@@ -334,6 +334,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
