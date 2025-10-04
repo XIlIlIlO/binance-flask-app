@@ -38,6 +38,29 @@ CMC_ENDPOINT       = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listin
 cmc_top30_cache    = []  # [{rank, name, symbol, market_cap_usd}]  ← 실제로 Top100 저장
 cmc_last_update_ts = 0
 
+# ====== 선물 티커 예외 매핑/배제 설정 (원하는 대로 수정) ======
+# 예: SHIB -> 1000SHIBUSDT, PEPE -> 1000PEPEUSDT
+FUTURES_SYMBOL_OVERRIDES = {
+    "SHIB": "1000SHIBUSDT",
+    "PEPE": "1000PEPEUSDT",
+    # 필요시 추가/삭제
+}
+
+# 선물 취급에서 제외할 현물 심볼(스테이블 등)
+FUTURES_FORCE_EXCLUDE = {
+    # 가령 옆처럼"USDT", "USDC", "USDe", "FDUSD", "DAI",
+}
+
+def to_futures_symbol(spot_symbol: str):
+    """CMC 심볼 -> 바이낸스 USDT 무기한 선물 심볼 (예외/배제 적용).
+       배제되면 None 반환."""
+    if not spot_symbol:
+        return None
+    if spot_symbol in FUTURES_FORCE_EXCLUDE:
+        return None
+    return FUTURES_SYMBOL_OVERRIDES.get(spot_symbol, f"{spot_symbol}USDT")
+
+
 
 # ======================================================
 # 도우미: 바이낸스 USDT 무기한 선물 심볼 목록
@@ -238,7 +261,7 @@ def top_marketcap_enriched():
     out = []
     for row in cmc_top30_cache:  # 실제 Top100
         symbol = row["symbol"]            # 예: BTC
-        fut    = symbol + "USDT"          # 예: BTCUSDT
+        fut    = to_futures_symbol(symbol)  # ★ 예외/배제 반영
 
         listed = fut in futures_symbols_set
         oneh   = volatility_map_1h_all.get(fut) if listed else None
@@ -298,7 +321,7 @@ def top_marketcap_enriched_range():
             continue
 
         symbol = row["symbol"]
-        fut    = f"{symbol}USDT"
+        fut    = to_futures_symbol(symbol)  # ★ 예외/배제 반영
 
         listed = fut in futures_symbols_set
         oneh   = volatility_map_1h_all.get(fut) if listed else None
@@ -335,6 +358,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
