@@ -43,6 +43,7 @@ cmc_last_update_ts = 0
 FUTURES_SYMBOL_OVERRIDES = {
     "SHIB": "1000SHIBUSDT",
     "PEPE": "1000PEPEUSDT",
+    "BONK": "1000BONKUSDT"
     # 필요시 추가/삭제
 }
 
@@ -71,7 +72,7 @@ def get_usdt_symbols():
         s['symbol'] for s in exchange_info['symbols']
         if s.get('quoteAsset') == 'USDT'
         and s.get('contractType') == 'PERPETUAL'
-        and not s['symbol'].startswith('LD')
+        
     ]
     global futures_symbols_set
     futures_symbols_set = set(syms)  # 최신화
@@ -358,6 +359,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
