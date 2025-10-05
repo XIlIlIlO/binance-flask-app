@@ -135,7 +135,7 @@ def update_volatility_all():
         target = []
         if cmc_symbols and futures_symbols_set:
             for sym in cmc_symbols:
-                fut = f"{sym}USDT"
+                fut = to_futures_symbol(sym)   # ← KEY POINT
                 if fut in futures_symbols_set:
                     target.append(fut)
 
@@ -360,6 +360,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
