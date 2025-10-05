@@ -129,21 +129,18 @@ def update_volatility_all():
             print("[ALL] exchange_info error:", e)
             all_fut_symbols = []
 
-        # CMC Top100의 심볼 집합
+        # CMC Top100의 심볼 집합 (예: {"BTC","ETH",...})
         cmc_symbols = {row["symbol"] for row in cmc_top30_cache if row.get("symbol")}
-
-        # ✅ 교집합 대상 만들 때 'to_futures_symbol'로 예외/배제 반영
-        target_set = set()
+        # 우리가 조인에 쓰는 표준 선물 티커는 "SYMBOLUSDT" 뿐이므로, 그 교집합만 수집
+        target = []
         if cmc_symbols and futures_symbols_set:
             for sym in cmc_symbols:
-                fut = to_futures_symbol(sym)   # ★ 여기!
-                if not fut:                    # 배제(예: 스테이블)면 skip
-                    continue
+                fut = f"{sym}USDT"
                 if fut in futures_symbols_set:
-                    target_set.add(fut)
+                    target.append(fut)
 
-        # 초기 구동 등으로 target이 너무 적으면 전체 수행 (안전망)
-        symbols = list(target_set) if target_set else all_fut_symbols
+        # 초기 구동 등으로 target이 비면 전체 수행 (안전망)
+        symbols = target if target else all_fut_symbols
 
         res_1m, res_5m, res_15m, res_1h_list = [], [], [], []
         map_1h_all = {}
@@ -167,22 +164,23 @@ def update_volatility_all():
                 res_15m.append({"symbol": sym, "volatility": r15["volatility"], "color": r15["color"], "volume_usdt": r15["quote_vol_sum"]})
             if r60:
                 entry_1h = {
-                    "symbol": sym,                 # sym은 이미 FUTURES 심볼(예: 1000SHIBUSDT)
+                    "symbol": sym,
                     "volatility": r60["volatility"],
-                    "color": r60["color"],
+                    "color": r60["color"],             # ✅ 1시간 시가/종가 기반
                     "volume_usdt": r60["quote_vol_sum"],
-                    "open": r60["open"],
-                    "close": r60["close"],
+                    "open": r60["open"],               # ✅ 1시간 시가
+                    "close": r60["close"],             # ✅ 1시간 종가
                 }
                 res_1h_list.append(entry_1h)
-                map_1h_all[sym] = entry_1h      # ✅ 키도 FUTURES 심볼로 저장
+                map_1h_all[sym] = entry_1h
 
-        # 정렬 및 캐시 교체 (그대로)
+        # 정렬
         res_1m.sort(key=lambda x: x["volatility"], reverse=True)
         res_5m.sort(key=lambda x: x["volatility"], reverse=True)
         res_15m.sort(key=lambda x: x["volatility"], reverse=True)
         res_1h_list.sort(key=lambda x: x["volatility"], reverse=True)
 
+        # 원자 교체
         volatility_map_1h_all = map_1h_all
         volatility_cache_1m  = res_1m[:N]
         volatility_cache_5m  = res_5m[:N]
@@ -362,10 +360,6 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
-
-
-
-
 
 
 
