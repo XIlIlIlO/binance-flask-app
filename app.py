@@ -140,7 +140,7 @@ def update_volatility_all():
                     target.append(fut)
 
         # 초기 구동 등으로 target이 비면 전체 수행 (안전망)
-        symbols = list(sorted(set(target if target else all_fut_symbols)))  # ← set() 추가
+        symbols = list(sorted(set(all_fut_symbols)))
 
         res_1m, res_5m, res_15m, res_1h_list = [], [], [], []
         map_1h_all = {}
@@ -360,6 +360,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
