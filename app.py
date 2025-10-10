@@ -356,15 +356,16 @@ def top_marketcap_enriched_range():
 # ======================================================
 recent_3m, recent_3to6m = [], []
 
-# ✅ NEW: 3개월 이내 코인의 Max변동폭 랭킹(1분 갱신)
-recent_3m_maxrank = []   # [{symbol, max_range_pct, avg_turnover_usdt, color}]
+# ✅ NEW: 3개월 & 3~6개월 코인의 Max 변동폭 랭킹(1분 갱신)
+recent_3m_maxrank = []     # [{symbol, max_range_pct, avg_turnover_usdt, color}]
+recent_3to6m_maxrank = []  # ✅ 추가
 
 def update_recent_listings():
-    global recent_3m, recent_3to6m, recent_3m_maxrank
+    global recent_3m, recent_3to6m, recent_3m_maxrank, recent_3to6m_maxrank
     while True:
         start = time.time()
         r3, r36 = [], []
-        r3_rank = []  # ✅ NEW
+        r3_rank, r36_rank = [], []  # ✅ NEW
 
         for sym in futures_symbols_set:
             try:
@@ -373,7 +374,6 @@ def update_recent_listings():
                     continue
                 d = len(kl)
 
-                # 고/저/종가, 일간 quoteAssetVolume(USDT)
                 highs = [float(k[2]) for k in kl]
                 lows  = [float(k[3]) for k in kl]
                 closes = [float(k[4]) for k in kl]
@@ -399,7 +399,6 @@ def update_recent_listings():
 
                 if d <= 90:
                     r3.append(info_base)
-                    # ✅ 랭킹용 항목
                     r3_rank.append({
                         "symbol": sym,
                         "max_range_pct": round(max_range_pct, 2),
@@ -408,17 +407,29 @@ def update_recent_listings():
                     })
                 elif 90 < d <= 180:
                     r36.append(info_base)
+                    # ✅ 3~6개월용 랭킹 추가
+                    r36_rank.append({
+                        "symbol": sym,
+                        "max_range_pct": round(max_range_pct, 2),
+                        "avg_turnover_usdt": round(avg_turnover_usdt, 2),
+                        "color": color
+                    })
 
             except:
                 continue
 
         # ✅ 캐시 교체
         recent_3m, recent_3to6m = r3, r36
-        # Max 변동폭 내림차순 정렬
-        r3_rank.sort(key=lambda x: x["max_range_pct"], reverse=True)
-        recent_3m_maxrank = r3_rank
 
-        print(f"[RECENT] 3m:{len(r3)} / 3~6m:{len(r36)} / 3m-rank:{len(r3_rank)}")
+        # ✅ 내림차순 정렬 (MAX 변동폭 높은 순)
+        r3_rank.sort(key=lambda x: x["max_range_pct"], reverse=True)
+        r36_rank.sort(key=lambda x: x["max_range_pct"], reverse=True)
+
+        # ✅ 결과 저장
+        recent_3m_maxrank = r3_rank
+        recent_3to6m_maxrank = r36_rank
+
+        print(f"[RECENT] 3m:{len(r3)} / 3~6m:{len(r36)} | 3m-rank:{len(r3_rank)} / 3~6m-rank:{len(r36_rank)}")
 
         elapsed = time.time() - start
         time.sleep(60 - elapsed if elapsed < 60 else 1.0)
@@ -440,7 +451,14 @@ def get_recent_3m_maxrange_ranked():
         "data": recent_3m_maxrank
     })
 
-
+# ✅ NEW: 3~6개월 MAX 변동폭 랭킹용 엔드포인트
+@app.route("/recent_3to6m_maxrange_ranked")
+def get_recent_3to6m_maxrange_ranked():
+    return jsonify({
+        "last_updated_unix": int(time.time()),
+        "count": len(recent_3to6m_maxrank),
+        "data": recent_3to6m_maxrank
+    })
 # ======================================================
 # 실행
 # ======================================================
@@ -449,6 +467,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     threading.Thread(target=update_recent_listings, daemon=True).start()  # ✅ 추가
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
