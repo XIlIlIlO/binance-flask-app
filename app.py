@@ -351,7 +351,40 @@ def top_marketcap_enriched_range():
         "data": out,
     })
 
+# ======================================================
+# 🔹 상장 3개월 / 3~6개월 이내 코인 분류
+# ======================================================
+recent_3m, recent_3to6m = [], []
 
+def update_recent_listings():
+    global recent_3m, recent_3to6m
+    while True:
+        start = time.time()  # ✅ 시작 시각 기록
+        r3, r36 = [], []
+        for sym in futures_symbols_set:
+            try:
+                kl = client.futures_klines(symbol=sym, interval="1d", limit=200)
+                d = len(kl)
+                if d <= 90:
+                    r3.append({"symbol": sym, "days": d})
+                elif 90 < d <= 180:
+                    r36.append({"symbol": sym, "days": d})
+            except:
+                continue
+        recent_3m, recent_3to6m = r3, r36
+        print(f"[RECENT] 3m:{len(r3)} / 3~6m:{len(r36)}")
+
+        # ✅ 실행 시간 보정
+        elapsed = time.time() - start
+        time.sleep(60 - elapsed if elapsed < 60 else 1.0)
+
+@app.route("/recent_3m")
+def get_recent_3m():
+    return jsonify(recent_3m)
+
+@app.route("/recent_3to6m")
+def get_recent_3to6m():
+    return jsonify(recent_3to6m)
 
 # ======================================================
 # 실행
@@ -359,7 +392,9 @@ def top_marketcap_enriched_range():
 if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
+    threading.Thread(target=update_recent_listings, daemon=True).start()  # ✅ 추가
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
