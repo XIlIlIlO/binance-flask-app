@@ -352,29 +352,45 @@ def top_marketcap_enriched_range():
     })
 
 # ======================================================
-# 🔹 상장 3개월 / 3~6개월 이내 코인 분류
+# 🔹 상장 3개월 / 3~6개월 이내 코인 분류 (+ Max 변동폭)
 # ======================================================
 recent_3m, recent_3to6m = [], []
 
 def update_recent_listings():
     global recent_3m, recent_3to6m
     while True:
-        start = time.time()  # ✅ 시작 시각 기록
+        start = time.time()
         r3, r36 = [], []
         for sym in futures_symbols_set:
             try:
                 kl = client.futures_klines(symbol=sym, interval="1d", limit=200)
+                if not kl:
+                    continue
                 d = len(kl)
+
+                # ✅ Max 변동폭 = (전체 일봉 고점 / 전체 일봉 저점 - 1) * 100 (%)
+                highs = [float(k[2]) for k in kl]
+                lows  = [float(k[3]) for k in kl]
+                hi = max(highs)
+                lo = max(min(lows), 1e-12)
+                max_range_pct = (hi / lo - 1.0) * 100.0
+
+                info = {
+                    "symbol": sym,
+                    "days": d,                               # 상장 후 경과일 근사치
+                    "max_range_pct": round(max_range_pct, 2) # 예: 138.42
+                }
+
                 if d <= 90:
-                    r3.append({"symbol": sym, "days": d})
+                    r3.append(info)
                 elif 90 < d <= 180:
-                    r36.append({"symbol": sym, "days": d})
+                    r36.append(info)
             except:
                 continue
+
         recent_3m, recent_3to6m = r3, r36
         print(f"[RECENT] 3m:{len(r3)} / 3~6m:{len(r36)}")
 
-        # ✅ 실행 시간 보정
         elapsed = time.time() - start
         time.sleep(60 - elapsed if elapsed < 60 else 1.0)
 
@@ -394,6 +410,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     threading.Thread(target=update_recent_listings, daemon=True).start()  # ✅ 추가
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
