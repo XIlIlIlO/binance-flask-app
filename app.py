@@ -356,11 +356,16 @@ def top_marketcap_enriched_range():
 # ======================================================
 recent_3m, recent_3to6m = [], []
 
+# ✅ NEW: 3개월 이내 코인의 Max변동폭 랭킹(1분 갱신)
+recent_3m_maxrank = []   # [{symbol, max_range_pct, avg_turnover_usdt, color}]
+
 def update_recent_listings():
-    global recent_3m, recent_3to6m
+    global recent_3m, recent_3to6m, recent_3m_maxrank
     while True:
         start = time.time()
         r3, r36 = [], []
+        r3_rank = []  # ✅ NEW
+
         for sym in futures_symbols_set:
             try:
                 kl = client.futures_klines(symbol=sym, interval="1d", limit=200)
@@ -368,31 +373,56 @@ def update_recent_listings():
                     continue
                 d = len(kl)
 
-                # ✅ Max 변동폭 = (전체 일봉 고점 / 전체 일봉 저점 - 1) * 100 (%)
+                # 고/저/종가, 일간 quoteAssetVolume(USDT)
                 highs = [float(k[2]) for k in kl]
                 lows  = [float(k[3]) for k in kl]
+                closes = [float(k[4]) for k in kl]
+                qsum  = sum(float(k[7]) for k in kl)
+
                 hi = max(highs)
                 lo = max(min(lows), 1e-12)
-                max_range_pct = (hi / lo - 1.0) * 100.0
+                cur = closes[-1]
 
-                info = {
+                # ✅ Max 변동폭 (%)
+                max_range_pct = (hi / lo - 1.0) * 100.0
+                # ✅ 일평균 거래대금(USDT)
+                avg_turnover_usdt = qsum / d if d > 0 else 0.0
+                # ✅ 색상 규칙
+                cond_pct = ((cur - lo) / lo) * 100.0 * 2.0
+                color = "red" if cond_pct <= max_range_pct else "green"
+
+                info_base = {
                     "symbol": sym,
-                    "days": d,                               # 상장 후 경과일 근사치
-                    "max_range_pct": round(max_range_pct, 2) # 예: 138.42
+                    "days": d,
+                    "max_range_pct": round(max_range_pct, 2)
                 }
 
                 if d <= 90:
-                    r3.append(info)
+                    r3.append(info_base)
+                    # ✅ 랭킹용 항목
+                    r3_rank.append({
+                        "symbol": sym,
+                        "max_range_pct": round(max_range_pct, 2),
+                        "avg_turnover_usdt": round(avg_turnover_usdt, 2),
+                        "color": color
+                    })
                 elif 90 < d <= 180:
-                    r36.append(info)
+                    r36.append(info_base)
+
             except:
                 continue
 
+        # ✅ 캐시 교체
         recent_3m, recent_3to6m = r3, r36
-        print(f"[RECENT] 3m:{len(r3)} / 3~6m:{len(r36)}")
+        # Max 변동폭 내림차순 정렬
+        r3_rank.sort(key=lambda x: x["max_range_pct"], reverse=True)
+        recent_3m_maxrank = r3_rank
+
+        print(f"[RECENT] 3m:{len(r3)} / 3~6m:{len(r36)} / 3m-rank:{len(r3_rank)}")
 
         elapsed = time.time() - start
         time.sleep(60 - elapsed if elapsed < 60 else 1.0)
+
 
 @app.route("/recent_3m")
 def get_recent_3m():
@@ -402,6 +432,15 @@ def get_recent_3m():
 def get_recent_3to6m():
     return jsonify(recent_3to6m)
 
+@app.route("/recent_3m_maxrange_ranked")
+def get_recent_3m_maxrange_ranked():
+    return jsonify({
+        "last_updated_unix": int(time.time()),
+        "count": len(recent_3m_maxrank),
+        "data": recent_3m_maxrank
+    })
+
+
 # ======================================================
 # 실행
 # ======================================================
@@ -410,6 +449,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     threading.Thread(target=update_recent_listings, daemon=True).start()  # ✅ 추가
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
