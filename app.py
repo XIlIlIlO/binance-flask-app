@@ -89,14 +89,14 @@ def _calc_from_1m_klines(klines, n):
         return None
     window = klines[-n:]
     try:
-        highs = [float(k[2]) for k in window]
-        lows  = [float(k[3]) for k in window]
+        hi = [float(k[2]) for k in window]
+        lo  = [float(k[3]) for k in window]
         quote_vol_sum = sum(float(k[7]) for k in window)  # USDT 금액 합계
 
         open_price  = float(window[0][1])
         close_price = float(window[-1][4])
-        high = max(highs)
-        low  = max(min(lows), 1e-12)
+        hi = max(highs)
+        lo  = max(min(lows), 1e-12)
 
         volatility = abs((high - low) / low) * 100.0
         color = "green" if close_price > open_price else "red"
@@ -592,6 +592,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_recent_listings, daemon=True).start()  # ✅ 추가
     threading.Thread(target=update_spike_dump_views, daemon=True).start()   # ✅ 추가
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
