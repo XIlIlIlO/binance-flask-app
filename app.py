@@ -515,13 +515,11 @@ def _compute_spike_dump_from_snapshot(snapshot_entries, limit=26):
 
 
 def update_spike_dump_views():
-    """1분마다 현재 캐시 스냅샷을 읽어 급등/급락(전종목/신규) 4종 캐시를 갱신."""
     global spike_all_1h_cache, dump_all_1h_cache, spike_new_1h_cache, dump_new_1h_cache
     N = 26
     while True:
         start = time.time()
         try:
-            # 스냅샷 확보 (원자 교체를 가정 → 얕은 복사)
             snapshot_all = list(volatility_map_1h_all.values())
 
             # 전종목 급등/급락
@@ -529,9 +527,10 @@ def update_spike_dump_views():
             spike_all_1h_cache = spike_all
             dump_all_1h_cache  = dump_all
 
-            # 신규코인(최근 3개월) 심볼셋
-            # recent_3m: [{symbol, days, max_range_pct}, ...] 형태
-            new_symbols = {row["symbol"] for row in recent_3m if row.get("symbol")}
+            # 🔁 신규코인 = 상장 ≤ 6개월(<=180일)로 변경
+            # 이전: new_symbols = {row["symbol"] for row in recent_3m if row.get("symbol")}
+            new_symbols = ({row["symbol"] for row in recent_3m if row.get("symbol")} |
+                           {row["symbol"] for row in recent_3to6m if row.get("symbol")})
             snapshot_new = [e for e in snapshot_all if e.get("symbol") in new_symbols]
 
             spike_new, dump_new = _compute_spike_dump_from_snapshot(snapshot_new, limit=N)
@@ -539,14 +538,13 @@ def update_spike_dump_views():
             dump_new_1h_cache  = dump_new
 
             print(f"[SPIKE/DUMP VIEWS] all(sp:{len(spike_all)} du:{len(dump_all)}) "
-                  f"/ new(sp:{len(spike_new)} du:{len(dump_new)})")
+                  f"/ new≤6m(sp:{len(spike_new)} du:{len(dump_new)})")
 
         except Exception as e:
             print("[SPIKE/DUMP VIEWS] error:", e)
 
         elapsed = time.time() - start
         time.sleep(60 - elapsed if elapsed < 60 else 1.0)
-
 
 # =========================
 # 📡 엔드포인트 4종
@@ -593,6 +591,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_recent_listings, daemon=True).start()  # ✅ 추가
     threading.Thread(target=update_spike_dump_views, daemon=True).start()   # ✅ 추가
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
