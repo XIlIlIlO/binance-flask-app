@@ -107,6 +107,8 @@ def _calc_from_1m_klines(klines, n):
             "quote_vol_sum": quote_vol_sum,
             "open": open_price,
             "close": close_price,
+            "hi": hi,            # ✅ 추가
+            "lo": lo             # ✅ 추가
         }
     except Exception:
         return None
@@ -170,6 +172,8 @@ def update_volatility_all():
                     "volume_usdt": r60["quote_vol_sum"],
                     "open": r60["open"],               # ✅ 1시간 시가
                     "close": r60["close"],             # ✅ 1시간 종가
+                    "hi": r60["hi"],      # ✅ 추가
+                    "lo": r60["lo"]       # ✅ 추가
                 }
                 res_1h_list.append(entry_1h)
                 map_1h_all[sym] = entry_1h
@@ -459,6 +463,126 @@ def get_recent_3to6m_maxrange_ranked():
         "count": len(recent_3to6m_maxrank),
         "data": recent_3to6m_maxrank
     })
+
+
+
+# ======================================================
+# 🔹 1시간 구간 급등/급락 (전종목 / 신규코인) — 1분 주기 재가공
+#    기존 volatility_map_1h_all(hi/lo/close/volume_usdt 포함)을 재활용 → 추가 API 호출 없음
+# ======================================================
+spike_all_1h_cache   = []  # 전종목 급등
+dump_all_1h_cache    = []  # 전종목 급락
+spike_new_1h_cache   = []  # 신규코인 급등 (recent_3m 대상)
+dump_new_1h_cache    = []  # 신규코인 급락 (recent_3m 대상)
+
+def _compute_spike_dump_from_snapshot(snapshot_entries, limit=26):
+    """volatility_map_1h_all의 value 리스트(snapshot)를 입력받아
+       급등/급락 랭킹을 계산해 (상위 limit) 반환한다."""
+    res_spike, res_dump = [], []
+    for e in snapshot_entries:
+        try:
+            hi = float(e.get("hi") or 0.0)
+            lo = float(e.get("lo") or 0.0)
+            cur = float(e.get("close") or 0.0)
+            qsum = float(e.get("volume_usdt") or 0.0)
+            if hi <= 0.0 or lo <= 0.0 or cur <= 0.0:
+                continue
+
+            # ✅ 정의
+            spike_pct = ((cur - lo) / lo) * 100.0
+            dump_pct  = ((hi - cur) / hi) * 100.0
+            range_pct = ((hi - lo) / lo) * 100.0
+
+            # ✅ 색상 규칙
+            color = "red" if (spike_pct * 2.0 <= range_pct) else "green"
+
+            base = {
+                "symbol": e.get("symbol"),
+                "volume_usdt_1h": round(qsum, 2),
+                "color": color
+            }
+            res_spike.append({**base, "spike_pct": round(spike_pct, 2)})
+            res_dump.append({**base, "dump_pct":  round(dump_pct,  2)})
+
+        except Exception:
+            continue
+
+    # 정렬 & 상위 제한
+    res_spike.sort(key=lambda x: x["spike_pct"], reverse=True)
+    res_dump.sort(key=lambda x: x["dump_pct"],  reverse=True)
+    return res_spike[:limit], res_dump[:limit]
+
+
+def update_spike_dump_views():
+    """1분마다 현재 캐시 스냅샷을 읽어 급등/급락(전종목/신규) 4종 캐시를 갱신."""
+    global spike_all_1h_cache, dump_all_1h_cache, spike_new_1h_cache, dump_new_1h_cache
+    N = 26
+    while True:
+        start = time.time()
+        try:
+            # 스냅샷 확보 (원자 교체를 가정 → 얕은 복사)
+            snapshot_all = list(volatility_map_1h_all.values())
+
+            # 전종목 급등/급락
+            spike_all, dump_all = _compute_spike_dump_from_snapshot(snapshot_all, limit=N)
+            spike_all_1h_cache = spike_all
+            dump_all_1h_cache  = dump_all
+
+            # 신규코인(최근 3개월) 심볼셋
+            # recent_3m: [{symbol, days, max_range_pct}, ...] 형태
+            new_symbols = {row["symbol"] for row in recent_3m if row.get("symbol")}
+            snapshot_new = [e for e in snapshot_all if e.get("symbol") in new_symbols]
+
+            spike_new, dump_new = _compute_spike_dump_from_snapshot(snapshot_new, limit=N)
+            spike_new_1h_cache = spike_new
+            dump_new_1h_cache  = dump_new
+
+            print(f"[SPIKE/DUMP VIEWS] all(sp:{len(spike_all)} du:{len(dump_all)}) "
+                  f"/ new(sp:{len(spike_new)} du:{len(dump_new)})")
+
+        except Exception as e:
+            print("[SPIKE/DUMP VIEWS] error:", e)
+
+        elapsed = time.time() - start
+        time.sleep(60 - elapsed if elapsed < 60 else 1.0)
+
+
+# =========================
+# 📡 엔드포인트 4종
+# =========================
+@app.route("/top_spike_1h_all")
+def api_top_spike_1h_all():
+    return jsonify({
+        "last_updated_unix": int(time.time()),
+        "count": len(spike_all_1h_cache),
+        "data": spike_all_1h_cache
+    })
+
+@app.route("/top_dump_1h_all")
+def api_top_dump_1h_all():
+    return jsonify({
+        "last_updated_unix": int(time.time()),
+        "count": len(dump_all_1h_cache),
+        "data": dump_all_1h_cache
+    })
+
+@app.route("/top_spike_1h_recent")
+def api_top_spike_1h_recent():
+    return jsonify({
+        "last_updated_unix": int(time.time()),
+        "count": len(spike_new_1h_cache),
+        "data": spike_new_1h_cache
+    })
+
+@app.route("/top_dump_1h_recent")
+def api_top_dump_1h_recent():
+    return jsonify({
+        "last_updated_unix": int(time.time()),
+        "count": len(dump_new_1h_cache),
+        "data": dump_new_1h_cache
+    })
+
+
 # ======================================================
 # 실행
 # ======================================================
@@ -466,7 +590,9 @@ if __name__ == "__main__":
     threading.Thread(target=update_volatility_all, daemon=True).start()
     threading.Thread(target=update_cmc_top30,    daemon=True).start()
     threading.Thread(target=update_recent_listings, daemon=True).start()  # ✅ 추가
+    threading.Thread(target=update_spike_dump_views, daemon=True).start()   # ✅ 추가
     app.run(host="0.0.0.0", port=8080)
+
 
 
 
